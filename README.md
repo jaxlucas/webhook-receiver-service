@@ -57,6 +57,41 @@ rest back to `queued` without touching their counters. Compose sets `stop_grace_
 **Backup / rollback:** `sqlite3 /data/events.db ".backup /backup/events.db"` (never a plain file copy while
 replicas run). An older image refuses to start on a newer schema.
 
+## How the guarantees are met
+
+| Requirement | How |
+|---|---|
+| Fast answer | Ingest is one short write; concurrent writes share one fsync (group commit). Handlers never run in the request path. |
+| No duplicates | Unique `(event_type, idempotency_key)`; lookup and insert run in one `BEGIN IMMEDIATE` transaction. Repeat → `200` with the original receipt; different body → `409`. |
+| Accepted = kept | `202` only after the fsynced commit (`synchronous=FULL`). The database is the queue. |
+| Exactly once | A result commits only if the row still carries the run's `lease_token`. A crash re-runs the handler, so handlers must be idempotent. |
+| Safe downstream calls | `ctx.idempotency_key` (the receipt id) is stable across retries and replays; pass it downstream, one suffix per step (`:charge`, `:email`). |
+| Replicas / losing one | One atomic claim `UPDATE … RETURNING`, so no event is claimed twice; expired leases are reaped and re-run. Tested with one of two replicas killed under load: 0 errors. |
+
+Key processes:
+
+1. **Ingest:** validate → check key and insert → `202`.
+2. **Claim:** lease the event (owner, expiry, token); run it with a timeout and a per-handler concurrency limit.
+3. **Outcome:** token-guarded write → `completed`, `queued` again with backoff, or `failed`.
+4. **Lease keeper:** renews leases; if renewal keeps failing, the replica cancels its own handler.
+5. **Reaper:** expired leases go back to `queued`; too many expiries → `failed`.
+6. **Shutdown:** stop claiming, wait `SHUTDOWN_GRACE`, release leases.
+7. **Retry / purge:** replay a failed event by hand; delete finished events after the 24 h TTL.
+
+## Future work / TODO
+
+Some auth method allowing to identify users.
+
+Moving workers to another app (separation of concerns) ? depends on the workers actual jobs.
+
+### Rate limiting
+
+At the moment we have none. Rate limiting could be introduced in many ways. For example simple nginx config would block overusing IPs. Proper in-app rate limiting should rely on client identification which is absent at the moment, when we have it we may keep a per-user cap (in-memory / shared DB / Redis). In-memory is not suitable when more than 1 replica.
+
+### Switch to PostgreSQL
+
+SQLite has no row locking: `BEGIN IMMEDIATE` takes one write lock for the whole database file, shared by all replicas. Every write (ingest, claim, lease renewal, outcome) is serialized behind it, and with `synchronous=FULL` throughput is capped at roughly one fsync per group commit (~145 commits/s on a local SSD). It also pins all replicas to one host. PostgreSQL locks only what is touched: ingest can become `INSERT … ON CONFLICT DO NOTHING RETURNING` (a `SELECT` only on conflict, contending on just that key's index entry), and claiming can use `SELECT … FOR UPDATE SKIP LOCKED`. Implement it as a `PostgresEventStore` behind the existing `EventStore` protocol.
+
 ## Development
 
 ```bash
