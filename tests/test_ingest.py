@@ -246,3 +246,31 @@ async def test_result_and_error_presence_rules(harness: Harness) -> None:
     assert body["result"]["handled_by"] == "stub"
     assert body["last_error"] is None and body["failure_reason"] is None
     assert body["completed_at"] is not None
+
+
+async def test_lone_surrogate_payload_is_422(api: Harness) -> None:
+    raw = b'{"idempotency_key": "k", "event_type": "t", "payload": {"x": "\\ud800"}}'
+    response = await api.client.post("/events", content=raw, headers={"content-type": "application/json"})
+    assert response.status_code == 422
+    assert response.json()["errors"][0]["loc"] == ["body", "payload"]
+
+
+async def test_disk_full_is_503_and_stores_nothing(api: Harness) -> None:
+    store = api.store
+    await store._on_writer_thread(
+        lambda: store.writer.execute(
+            "PRAGMA max_page_count = " + str(store.writer.execute("PRAGMA page_count").fetchone()[0])
+        ).fetchall()
+    )
+    big = {"blob": "x" * 200_000}
+    response = await api.post_event(key="full", payload=big)
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "1"
+    assert response.json()["type"] == "unavailable"
+    conn = sqlite3.connect(api.settings.DATABASE_PATH)
+    assert conn.execute("SELECT count(*) FROM events").fetchone()[0] == 0
+    # The writer thread survived: once space is back, writes work again.
+    await store._on_writer_thread(
+        lambda: store.writer.execute("PRAGMA max_page_count = 1073741823").fetchall()
+    )
+    assert (await api.post_event(key="after", payload=1)).status_code == 202

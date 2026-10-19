@@ -51,7 +51,7 @@ Every setting is an environment variable; the main ones (defaults): `DATABASE_PA
 is `src/webhook_receiver/config.py`.
 
 **Shutdown:** on SIGTERM a replica stops claiming, waits `SHUTDOWN_GRACE` for running handlers, then releases the
-rest back to `queued` without touching their counters. Compose sets `stop_grace_period: 20s`; if you raise
+rest back to `queued` without touching their counters. Compose sets `stop_grace_period: 30s`; if you raise
 `SHUTDOWN_GRACE` for long handlers, raise `stop_grace_period` with it.
 
 **Backup / rollback:** `sqlite3 /data/events.db ".backup /backup/events.db"` (never a plain file copy while

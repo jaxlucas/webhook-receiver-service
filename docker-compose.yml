@@ -27,8 +27,9 @@ services:
       - events-data:/data
     deploy:
       replicas: ${API_REPLICAS:-2}
-    # Longer than SHUTDOWN_GRACE (10 s): Docker never SIGKILLs a replica mid-commit on a normal redeploy.
-    stop_grace_period: 20s
+    # Longer than HTTP drain (5 s) + finishing a claim (<= BUSY_TIMEOUT 5 s) + SHUTDOWN_GRACE (10 s) + release:
+    # Docker never SIGKILLs a replica before it has released its leases on a normal redeploy.
+    stop_grace_period: 30s
     restart: unless-stopped
 
   prometheus:

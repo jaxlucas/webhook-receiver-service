@@ -21,7 +21,8 @@ def main() -> None:
         access_log=False,
         proxy_headers=True,
         forwarded_allow_ips=os.environ.get("FORWARDED_ALLOW_IPS", "*"),
-        timeout_graceful_shutdown=int(settings.SHUTDOWN_GRACE) + 5,
+        # HTTP drain, then the lifespan waits SHUTDOWN_GRACE; keep the sum under stop_grace_period.
+        timeout_graceful_shutdown=5,
     )
 
 

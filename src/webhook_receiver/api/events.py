@@ -86,6 +86,13 @@ async def post_event(request: Request, svc: ServicesDep) -> JSONResponse:
     event = _parse_event(await request.body(), request.headers.get("content-type"))
     # All CPU work happens before the write transaction begins.
     canonical = canonical_json(event.payload)
+    try:
+        canonical.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        # JSON allows "\ud800" escapes, but a lone surrogate cannot be stored as UTF-8.
+        raise RequestValidationError(
+            [{"loc": ("body", "payload"), "msg": "Payload contains an unpaired Unicode surrogate"}]
+        ) from exc
     request_id = current_request_id() or new_request_id()
     new = NewEvent(
         id=str(uuid.uuid7()),

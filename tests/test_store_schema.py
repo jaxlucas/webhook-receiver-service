@@ -185,3 +185,20 @@ async def test_slow_write_is_logged(tmp_path: Path, logs: LogCapture) -> None:
     assert slow_lines and slow_lines[0]["op"] == "insert"
     assert slow_lines[0]["lock_held_ms"] > 50
     assert observed and observed[0][0] == "insert" and observed[0][1] >= 0.08
+
+
+async def test_close_with_a_queued_write_does_not_hang(tmp_path: Path) -> None:
+    import asyncio
+
+    store = SqliteEventStore(str(tmp_path / "e.db"))
+    await store.open()
+
+    def slow(conn):
+        time.sleep(0.1)
+        conn.execute("SELECT 1")
+        return "done"
+
+    pending = asyncio.create_task(store._write("insert", slow))
+    await asyncio.sleep(0.01)
+    await asyncio.wait_for(store.close(), timeout=5)
+    assert await asyncio.wait_for(pending, timeout=1) == "done"

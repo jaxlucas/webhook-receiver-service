@@ -117,7 +117,9 @@ class Dispatcher:
         if self._loop_task is not None:
             # Let the loop finish its current tick instead of cancelling it: a claim that is committing
             # right now must still spawn its rows, so they are completed or released below, not reaped.
-            done, _ = await asyncio.wait([self._loop_task], timeout=max(5.0, self.settings.POLL_INTERVAL * 4))
+            # Bounded by one claim: the writer gives up on the lock after BUSY_TIMEOUT_MS.
+            wait_s = self.settings.BUSY_TIMEOUT_MS / 1000 + self.settings.POLL_INTERVAL + 1.0
+            done, _ = await asyncio.wait([self._loop_task], timeout=wait_s)
             if not done:
                 self._loop_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -399,9 +401,11 @@ class Dispatcher:
         now = self.clock.now_ms()
         try:
             renewed = await self.store.renew(self.replica_id, list(held), now, self.lease_ms)
-        except StoreUnavailableError as exc:
+        except Exception as exc:
+            # Any failure means the leases were not extended: self-fence whatever is about to expire.
             self.metrics.lease_renewals.labels("error").inc(len(held))
-            self._self_fence(held, exc.error)
+            error = exc.error if isinstance(exc, StoreUnavailableError) else repr(exc)
+            self._self_fence(held, error)
             return
         for token, inf in held.items():
             if token in renewed:

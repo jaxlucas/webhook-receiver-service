@@ -159,9 +159,9 @@ class SqliteEventStore:
 
     async def close(self) -> None:
         if self._writer is not None:
-            writer = self._writer
-            self._writer = None
-            await self._on_writer_thread(writer.close)
+            # Queued after any pending write, and _writer is cleared on the writer thread itself, so
+            # writes already in the queue still run against an open connection.
+            await self._on_writer_thread(self._close_writer)
         if self._writer_thread is not None:
             self._write_queue.put(_STOP)
             await asyncio.to_thread(self._writer_thread.join)
@@ -170,6 +170,11 @@ class SqliteEventStore:
             await reader.close()
         self._all_readers.clear()
         self._readers = asyncio.Queue()
+
+    def _close_writer(self) -> None:
+        writer, self._writer = self._writer, None
+        if writer is not None:
+            writer.close()
 
     @property
     def writer(self) -> sqlite3.Connection:
@@ -230,12 +235,19 @@ class SqliteEventStore:
                     break
                 batch.append(nxt)
             live = [it for it in batch if it.future.set_running_or_notify_cancel()]
-            if live:
+            if not live:
+                continue
+            try:
                 self._run_batch(live)
+            except BaseException as exc:
+                # Never let the writer thread die: every later write would hang instead of failing.
+                for it in live:
+                    if not it.future.done():
+                        it.future.set_exception(self._map_error(it.op, exc))
 
     def _run_batch(self, batch: list[_WriteItem]) -> None:
-        conn = self.writer
         try:
+            conn = self.writer
             self._begin(conn, batch[0].op)
         except BaseException as exc:
             for it in batch:
@@ -249,6 +261,9 @@ class SqliteEventStore:
                 try:
                     value = it.body(conn)
                 except BaseException as exc:
+                    if not conn.in_transaction:
+                        # SQLite rolled the whole transaction back (e.g. SQLITE_FULL): the batch is lost.
+                        raise
                     conn.execute("ROLLBACK TO op")
                     conn.execute("RELEASE op")
                     outcomes.append((it, None, exc))

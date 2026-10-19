@@ -72,7 +72,7 @@ Disk-space alerting belongs to host monitoring.
 `SHUTDOWN_GRACE` (default 10 s) is how long a replica waits for running handlers on SIGTERM. Afterwards `ctx.cancelled`
 is set, handlers are cancelled and their leases released to `queued` without changing counters: a redeploy re-runs
 long handlers from the start; it never fails them. Containers running long handlers may raise `SHUTDOWN_GRACE`;
-keep compose's `stop_grace_period` (20 s) above it, or Docker SIGKILLs the replica first.
+keep compose's `stop_grace_period` (30 s) above 5 s + 5 s + `SHUTDOWN_GRACE`, or Docker SIGKILLs the replica first.
 
 ## Log events
 
