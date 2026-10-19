@@ -1,0 +1,60 @@
+# Starting thresholds; tune them from docs/load-test.md. Shared-DB gauges are aggregated with max(), never sum().
+groups:
+  - name: webhook
+    rules:
+      - alert: WebhookBacklogGrowing
+        expr: max(webhook_oldest_queued_age_seconds) > 30
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Workers are not keeping up (oldest due event waited {{ $value | humanizeDuration }}).
+
+      - alert: WebhookEventsFailing
+        expr: sum(increase(webhook_processing_total{outcome="failed"}[10m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: Events reached failed; inspect them with GET /events?status=failed.
+
+      - alert: WebhookUnavailable
+        expr: |
+          sum(rate(webhook_http_requests_total{route="/events",method="POST",status=~"5.."}[5m]))
+            / sum(rate(webhook_http_requests_total{route="/events",method="POST"}[5m])) > 0.01
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: More than 1% of POST /events fail with 5xx (DB contention or disk); senders are retrying.
+
+      - alert: WebhookLeaseReaping
+        expr: sum(rate(webhook_leases_reaped_total[10m])) > 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Leases are being reaped; replicas are crashing or handlers are slower than the lease.
+
+      - alert: WebhookReplicaDown
+        expr: up{job="webhook"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: Replica {{ $labels.instance }} is not scrapeable.
+
+      - alert: WebhookWalLarge
+        expr: max(webhook_wal_bytes) > 1073741824
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: The WAL is above 1 GiB; checkpoints are starved by long readers.
+
+      - alert: WebhookLeaseRenewalFailing
+        expr: sum(rate(webhook_lease_renewals_total{result=~"lost|error"}[5m])) > 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: Lease renewals are failing; long handlers are at risk of running twice.
+
+      - alert: WebhookEventLoopBlocked
+        expr: histogram_quantile(0.99, sum by (le) (rate(webhook_event_loop_lag_seconds_bucket[5m]))) > 1
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: A handler blocks the event loop (p99 lag above 1 s); lease renewal is in danger.

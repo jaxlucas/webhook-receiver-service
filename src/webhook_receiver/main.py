@@ -69,6 +69,7 @@ def create_app(
         busy_timeout_ms=settings.BUSY_TIMEOUT_MS,
         read_pool_size=settings.READ_POOL_SIZE,
         slow_write_ms=settings.DB_WRITE_SLOW_MS,
+        write_batch_max=settings.DB_WRITE_BATCH_MAX,
         on_write=lambda op, held: metrics.db_write_lock.labels(op).observe(held),
     )
     queue_stats = QueueStatsCache(store, clock, settings.HEALTH_CACHE_SECONDS)

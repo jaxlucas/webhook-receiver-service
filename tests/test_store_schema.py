@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import multiprocessing
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -53,7 +53,9 @@ def test_concurrent_processes_apply_migration_once(tmp_path: Path) -> None:
     assert results == [LATEST_SCHEMA_VERSION] * 4
     conn = sqlite3.connect(db)
     assert conn.execute("PRAGMA user_version").fetchone()[0] == LATEST_SCHEMA_VERSION
-    indexes = conn.execute("SELECT count(*) FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'")
+    indexes = conn.execute(
+        "SELECT count(*) FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'"
+    )
     assert indexes.fetchone()[0] == 6
 
 
@@ -80,12 +82,17 @@ async def test_store_connections_use_required_pragmas(tmp_path: Path) -> None:
     store = SqliteEventStore(str(tmp_path / "e.db"), busy_timeout_ms=1234)
     await store.open()
     try:
-        for conn in (store.writer, *store._all_readers):
+        writer = store.writer
+        assert writer.execute("PRAGMA synchronous").fetchone()[0] == 2  # FULL
+        # The writer polls for the lock itself (bounded by busy_timeout_ms), see SqliteEventStore._begin.
+        assert writer.execute("PRAGMA busy_timeout").fetchone()[0] == 0
+        assert writer.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert writer.isolation_level is None
+        for conn in store._all_readers:
             async with conn.execute("PRAGMA synchronous") as cur:
-                assert (await cur.fetchone())[0] == 2  # FULL
+                assert (await cur.fetchone())[0] == 2
             async with conn.execute("PRAGMA busy_timeout") as cur:
                 assert (await cur.fetchone())[0] == 1234
-            assert conn.isolation_level is None
     finally:
         await store.close()
 
@@ -117,8 +124,15 @@ def _seed_for_planner(db: Path, rows: int = 2000) -> None:
         "next_attempt_at, request_id, received_at, updated_at, completed_at, lease_expires_at) "
         "VALUES (?, ?, ?, 'h', 'null', ?, ?, 'r', 0, 0, ?, ?)",
         [
-            (f"id{i:06d}", f"type{i % 7}", f"k{i}", statuses[i % 4], i, i if i % 4 >= 2 else None,
-             i if i % 4 == 1 else None)
+            (
+                f"id{i:06d}",
+                f"type{i % 7}",
+                f"k{i}",
+                statuses[i % 4],
+                i,
+                i if i % 4 >= 2 else None,
+                i if i % 4 == 1 else None,
+            )
             for i in range(rows)
         ],
     )
@@ -136,9 +150,7 @@ def test_query_plans_use_indexes(tmp_path: Path) -> None:
     _assert_indexed(_plan(db, claim, ("r", 1, 1, 1, 10)))
     _assert_indexed(_plan(db, claim_include, ("r", 1, 1, 1, "type1", "type2", 10)))
     _assert_indexed(_plan(db, claim_exclude, ("r", 1, 1, 1, "type1", "type2", 10)))
-    reap = (
-        "UPDATE events SET status='queued' WHERE status = 'processing' AND lease_expires_at <= ?"
-    )
+    reap = "UPDATE events SET status='queued' WHERE status = 'processing' AND lease_expires_at <= ?"
     _assert_indexed(_plan(db, reap, (5,)))
     reap_select = "SELECT id, lease_owner FROM events WHERE status = 'processing' AND lease_expires_at <= ?"
     _assert_indexed(_plan(db, reap_select, (5,)))
@@ -162,9 +174,9 @@ async def test_slow_write_is_logged(tmp_path: Path, logs: LogCapture) -> None:
     await store.open()
     try:
 
-        async def slow(conn):
-            await asyncio.sleep(0.08)
-            await conn.execute("SELECT 1")
+        def slow(conn):
+            time.sleep(0.08)
+            conn.execute("SELECT 1")
 
         await store._write("insert", slow)
     finally:

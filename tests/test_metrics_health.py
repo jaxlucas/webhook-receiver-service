@@ -124,8 +124,15 @@ async def test_queue_gauges_match_seeded_table(harness_factory: AppFactory) -> N
         conn = sqlite3.connect(h.settings.DATABASE_PATH)
         rows = []
         for i, (status, due) in enumerate(
-            [("queued", now - 7000), ("queued", now - 1000), ("queued", now + 60_000), ("processing", now),
-             ("failed", now), ("failed", now), ("completed", now)]
+            [
+                ("queued", now - 7000),
+                ("queued", now - 1000),
+                ("queued", now + 60_000),
+                ("processing", now),
+                ("failed", now),
+                ("failed", now),
+                ("completed", now),
+            ]
         ):
             rows.append((f"0000000{i}", "t", f"k{i}", status, due))
         conn.executemany(

@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     BUSY_TIMEOUT_MS: int = Field(5000, ge=0)
     READ_POOL_SIZE: int = Field(4, ge=1)
     DB_WRITE_SLOW_MS: float = 50.0
+    DB_WRITE_BATCH_MAX: int = Field(64, ge=1)
 
     WORKER_CONCURRENCY: int = Field(128, ge=1)
     CLAIM_BATCH: int = Field(32, ge=1)

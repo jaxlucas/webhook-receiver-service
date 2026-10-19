@@ -1,0 +1,82 @@
+# promtool test rules deploy/prometheus/alerts_test.yml
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: backlog grows on the shared DB (every replica reports the same value)
+    interval: 1m
+    input_series:
+      - series: 'webhook_oldest_queued_age_seconds{instance="r1:8000",job="webhook"}'
+        values: "5 10 40 45 50 55 60 65 70 75"
+      - series: 'webhook_oldest_queued_age_seconds{instance="r2:8000",job="webhook"}'
+        values: "5 10 40 45 50 55 60 65 70 75"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: WebhookBacklogGrowing
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: WebhookBacklogGrowing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: Workers are not keeping up (oldest due event waited 1m 10s).
+
+  - name: backlog alert ignores sum() inflation
+    interval: 1m
+    input_series:
+      - series: 'webhook_oldest_queued_age_seconds{instance="r1:8000",job="webhook"}'
+        values: "20x10"
+      - series: 'webhook_oldest_queued_age_seconds{instance="r2:8000",job="webhook"}'
+        values: "20x10"
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: WebhookBacklogGrowing
+        exp_alerts: []
+
+  - name: an event reaching failed fires at once
+    interval: 1m
+    input_series:
+      - series: 'webhook_processing_total{handler="stub",outcome="failed",instance="r1:8000",job="webhook"}'
+        values: "0 0 0 1 1 1"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: WebhookEventsFailing
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: WebhookEventsFailing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: Events reached failed; inspect them with GET /events?status=failed.
+
+  - name: lease renewal failures
+    interval: 1m
+    input_series:
+      - series: 'webhook_lease_renewals_total{result="error",instance="r1:8000",job="webhook"}'
+        values: "0+1x12"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: WebhookLeaseRenewalFailing
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: Lease renewals are failing; long handlers are at risk of running twice.
+
+  - name: event loop blocked
+    interval: 1m
+    input_series:
+      - series: 'webhook_event_loop_lag_seconds_bucket{le="1",instance="r1:8000",job="webhook"}'
+        values: "0+0x15"
+      - series: 'webhook_event_loop_lag_seconds_bucket{le="2.5",instance="r1:8000",job="webhook"}'
+        values: "0+60x15"
+      - series: 'webhook_event_loop_lag_seconds_bucket{le="+Inf",instance="r1:8000",job="webhook"}'
+        values: "0+60x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: WebhookEventLoopBlocked
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: A handler blocks the event loop (p99 lag above 1 s); lease renewal is in danger.

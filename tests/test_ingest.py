@@ -69,7 +69,9 @@ async def test_non_finite_numbers_are_422(api: Harness, raw: bytes) -> None:
 
 
 async def test_invalid_json_and_wrong_content_type_are_422(api: Harness) -> None:
-    bad_json = await api.client.post("/events", content=b"{nope", headers={"content-type": "application/json"})
+    bad_json = await api.client.post(
+        "/events", content=b"{nope", headers={"content-type": "application/json"}
+    )
     assert bad_json.status_code == 422
     wrong_type = await api.client.post(
         "/events", content=json.dumps(VALID).encode(), headers={"content-type": "text/plain"}
@@ -106,7 +108,9 @@ async def test_body_over_limit_chunked_is_413(api: Harness) -> None:
         for i in range(0, len(body), 16384):
             yield body[i : i + 16384]
 
-    response = await api.client.post("/events", content=chunks(), headers={"content-type": "application/json"})
+    response = await api.client.post(
+        "/events", content=chunks(), headers={"content-type": "application/json"}
+    )
     assert "content-length" not in response.request.headers
     assert response.status_code == 413
     assert response.json()["type"] == "payload-too-large"

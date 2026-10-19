@@ -1,0 +1,50 @@
+# One host only. All replicas share ONE local named volume holding the SQLite file.
+# Never put the volume on NFS/EFS/SMB or spread replicas across hosts: that corrupts the database
+# (startup refuses network filesystems on a best-effort basis).
+name: webhook-receiver
+
+services:
+  nginx:
+    image: nginx:1.28-alpine
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    build: .
+    image: webhook-receiver:local
+    environment:
+      DATABASE_PATH: /data/events.db
+      LOG_FORMAT: json
+      STUB_FAILURE_RATE: ${STUB_FAILURE_RATE:-0}
+      STUB_PERMANENT_FAILURE_RATE: ${STUB_PERMANENT_FAILURE_RATE:-0}
+    volumes:
+      - events-data:/data
+    deploy:
+      replicas: ${API_REPLICAS:-2}
+    # Longer than SHUTDOWN_GRACE (10 s): Docker never SIGKILLs a replica mid-commit on a normal redeploy.
+    stop_grace_period: 20s
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["obs"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      - api
+
+volumes:
+  events-data:
+    driver: local

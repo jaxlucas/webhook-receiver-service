@@ -90,8 +90,9 @@ class Harness:
     def metrics(self) -> Metrics:
         return self.services.metrics
 
-    async def post_event(self, key: str = "k1", event_type: str = "order.paid", payload: Any = None,
-                         **kwargs: Any) -> httpx.Response:
+    async def post_event(
+        self, key: str = "k1", event_type: str = "order.paid", payload: Any = None, **kwargs: Any
+    ) -> httpx.Response:
         body = {"idempotency_key": key, "event_type": event_type, "payload": payload}
         return await self.client.post("/events", json=body, **kwargs)
 

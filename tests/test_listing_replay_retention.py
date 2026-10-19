@@ -33,7 +33,10 @@ def _seed(db: str, rows: list[tuple[str, str, str, str, int | None]]) -> None:
 
 async def test_paging_returns_each_failed_row_once_newest_first(api: Harness) -> None:
     ids = [str(uuid.uuid7()) for _ in range(250)]
-    _seed(api.settings.DATABASE_PATH, [(i, "t" if n % 2 else "u", f"k{n}", "failed", 1) for n, i in enumerate(ids)])
+    _seed(
+        api.settings.DATABASE_PATH,
+        [(i, "t" if n % 2 else "u", f"k{n}", "failed", 1) for n, i in enumerate(ids)],
+    )
     _seed(api.settings.DATABASE_PATH, [(str(uuid.uuid7()), "t", f"q{n}", "queued", None) for n in range(5)])
     seen: list[str] = []
     cursor = None
@@ -58,15 +61,24 @@ async def test_paging_returns_each_failed_row_once_newest_first(api: Harness) ->
 
 async def test_listing_event_type_filter(api: Harness) -> None:
     ids = [str(uuid.uuid7()) for _ in range(10)]
-    _seed(api.settings.DATABASE_PATH, [(i, "t" if n % 2 else "u", f"k{n}", "failed", 1) for n, i in enumerate(ids)])
+    _seed(
+        api.settings.DATABASE_PATH,
+        [(i, "t" if n % 2 else "u", f"k{n}", "failed", 1) for n, i in enumerate(ids)],
+    )
     body = (await api.client.get("/events", params={"status": "failed", "event_type": "t"})).json()
     assert len(body["items"]) == 5 and all(item["event_type"] == "t" for item in body["items"])
     assert body["next_cursor"] is None
 
 
 async def test_listing_bad_parameters_are_422(api: Harness) -> None:
-    for params in ({}, {"status": "nope"}, {"status": "failed", "limit": 101}, {"status": "failed", "limit": 0},
-                   {"status": "failed", "cursor": "garbage!!"}, {"status": "failed", "cursor": "Zm9v"}):
+    for params in (
+        {},
+        {"status": "nope"},
+        {"status": "failed", "limit": 101},
+        {"status": "failed", "limit": 0},
+        {"status": "failed", "cursor": "garbage!!"},
+        {"status": "failed", "cursor": "Zm9v"},
+    ):
         response = await api.client.get("/events", params=params)
         assert response.status_code == 422, params
         assert response.json()["type"] == "validation-error"
@@ -111,7 +123,9 @@ async def test_replay_of_permanent_failure_completes(harness_factory: AppFactory
 
 async def test_replay_of_non_failed_event_is_409_and_changes_nothing(api: Harness) -> None:
     ids = {status: str(uuid.uuid7()) for status in ("completed", "queued", "processing")}
-    _seed(api.settings.DATABASE_PATH, [(i, "t", s, s, 1 if s == "completed" else None) for s, i in ids.items()])
+    _seed(
+        api.settings.DATABASE_PATH, [(i, "t", s, s, 1 if s == "completed" else None) for s, i in ids.items()]
+    )
     for status, event_id in ids.items():
         before = (await api.client.get(f"/events/{event_id}")).json()
         response = await api.client.post(f"/events/{event_id}/retry")
@@ -200,12 +214,18 @@ async def test_key_reuse_after_ttl(harness_factory: AppFactory) -> None:
 
 async def test_purger_drains_backlog_in_batches(harness_factory: AppFactory) -> None:
     clock = FakeClock()
-    async with harness_factory(start_workers=False, clock=clock, IDEMPOTENCY_TTL_SECONDS=60, PURGE_BATCH=1000) as h:
+    async with harness_factory(
+        start_workers=False, clock=clock, IDEMPOTENCY_TTL_SECONDS=60, PURGE_BATCH=1000
+    ) as h:
         db = h.settings.DATABASE_PATH
         old = clock.now_ms() - 61_000
-        expired = [(str(uuid.uuid7()), "t", f"e{n}", "completed" if n % 2 else "failed", old) for n in range(3500)]
+        expired = [
+            (str(uuid.uuid7()), "t", f"e{n}", "completed" if n % 2 else "failed", old) for n in range(3500)
+        ]
         fresh = [(str(uuid.uuid7()), "t", f"f{n}", "completed", clock.now_ms()) for n in range(10)]
-        unfinished = [(str(uuid.uuid7()), "t", f"u{n}", s, None) for n, s in enumerate(["queued", "processing"])]
+        unfinished = [
+            (str(uuid.uuid7()), "t", f"u{n}", s, None) for n, s in enumerate(["queued", "processing"])
+        ]
         _seed(db, expired + fresh + unfinished)
         stats = await h.services.purger.run_once()
         assert stats.deleted == 3500 and stats.batches == 4

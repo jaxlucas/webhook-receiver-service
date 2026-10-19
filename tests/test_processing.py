@@ -22,7 +22,9 @@ from webhook_receiver.store.sqlite import SqliteEventStore
 from webhook_receiver.worker.dispatcher import Dispatcher, backoff_ms
 
 
-def registry_with(handler: Any, name: str = "test", timeout: float = 60, concurrency: int = 128) -> HandlerRegistry:
+def registry_with(
+    handler: Any, name: str = "test", timeout: float = 60, concurrency: int = 128
+) -> HandlerRegistry:
     return HandlerRegistry(handler, HandlerSpec(name, timeout, concurrency))
 
 
@@ -40,7 +42,10 @@ async def test_posted_event_completes_with_request_id_in_log(harness: Harness) -
     completed = [line for line in harness.logs.events("event_completed") if line["receipt_id"] == receipt]
     assert completed and completed[0]["request_id"] == "post-req-1"
     assert {"handler_ms", "queue_wait_ms", "end_to_end_ms", "attempts"} <= set(completed[0])
-    assert metric_value(harness.metrics, "webhook_processing_total", {"handler": "stub", "outcome": "completed"}) == 1
+    assert (
+        metric_value(harness.metrics, "webhook_processing_total", {"handler": "stub", "outcome": "completed"})
+        == 1
+    )
 
 
 async def test_transient_failures_exhaust_retries(harness_factory: AppFactory) -> None:
@@ -113,7 +118,9 @@ def test_backoff_formula() -> None:
             assert base * 0.8 <= backoff_ms(5, attempts, rng) <= base * 1.2
 
 
-async def test_retry_timing_follows_backoff(store: SqliteEventStore, tmp_path: Path, logs: LogCapture) -> None:
+async def test_retry_timing_follows_backoff(
+    store: SqliteEventStore, tmp_path: Path, logs: LogCapture
+) -> None:
     async def failing(event: Event, ctx: HandlerContext) -> Any:
         raise RuntimeError("nope")
 
