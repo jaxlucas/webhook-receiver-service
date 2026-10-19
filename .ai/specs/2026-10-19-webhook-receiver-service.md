@@ -1,7 +1,8 @@
 # Webhook Receiver Service
 
-> Status: **draft for review**, 2026-10-19.
+> Status: **implemented**, 2026-10-19. Phases 1–5 shipped in PR #2. Load results are in [docs/load-test.md](../../docs/load-test.md), and the follow-ups are under "Future work / TODO" in the README.
 >
+> - Approved and merged as the design in PR #1.
 > - Open Questions Q1–Q12 were answered by the requester; see [Decisions](#-decisions).
 > - A fresh-context architectural review ran: 0 Critical, 3 High, 7 Medium and 4 Low findings. All of them are folded into this revision.
 > - Observability (structured logs, request ids, Prometheus metrics, failed-event listing) added on request, 2026-10-19.
