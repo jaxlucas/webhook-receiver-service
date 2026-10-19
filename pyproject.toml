@@ -1,0 +1,57 @@
+[project]
+name = "webhook-receiver"
+version = "0.1.0"
+description = "Receives webhook-style events, deduplicates them and processes each exactly once."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "aiosqlite>=0.20",
+    "structlog>=24.4",
+    "prometheus-client>=0.21",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.7",
+]
+load = [
+    "locust>=2.32",
+]
+
+[project.scripts]
+webhook-receiver = "webhook_receiver.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/webhook_receiver"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:logging"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "slow: multi-process or long-running tests",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py314"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "ASYNC", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003", "RUF012", "ASYNC240"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ASYNC109", "ASYNC251", "E501", "SIM115"]

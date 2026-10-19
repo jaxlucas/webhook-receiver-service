@@ -1,0 +1,13 @@
+.git
+.venv
+.ai
+**/__pycache__
+.pytest_cache
+.ruff_cache
+tests
+loadtest
+docs
+deploy
+*.db
+*.db-wal
+*.db-shm
