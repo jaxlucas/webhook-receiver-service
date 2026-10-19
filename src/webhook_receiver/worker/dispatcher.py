@@ -73,6 +73,7 @@ class Dispatcher:
         self._per_handler: defaultdict[str, int] = defaultdict(int)
         self._wake = asyncio.Event()
         self._stopping = False
+        self._claim_offset = 0
         self._loop_task: asyncio.Task[None] | None = None
         self._keeper_task: asyncio.Task[None] | None = None
         self.blocking_executor = ThreadPoolExecutor(
@@ -81,7 +82,7 @@ class Dispatcher:
         self._cpu_executor: Executor | None = None
         metrics.worker_slots.set(settings.WORKER_CONCURRENCY)
         for registration in registry.registrations():
-            metrics.handler_inflight.labels(registration.spec.name).set(0)
+            metrics.init_handler(registration.spec.name)
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -112,10 +113,15 @@ class Dispatcher:
         """Stop claiming, wait up to ``grace`` for in-flight handlers, then release their leases."""
         grace = self.settings.SHUTDOWN_GRACE if grace is None else grace
         self._stopping = True
+        self._wake.set()
         if self._loop_task is not None:
-            self._loop_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._loop_task
+            # Let the loop finish its current tick instead of cancelling it: a claim that is committing
+            # right now must still spawn its rows, so they are completed or released below, not reaped.
+            done, _ = await asyncio.wait([self._loop_task], timeout=max(5.0, self.settings.POLL_INTERVAL * 4))
+            if not done:
+                self._loop_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await self._loop_task
         tasks = [inf.task for inf in self._inflight.values() if inf.task is not None]
         if tasks:
             await asyncio.wait(tasks, timeout=grace)
@@ -199,7 +205,10 @@ class Dispatcher:
             return 0
         claimed_total = 0
         routed = self.registry.routed_types()
-        for registration in self.registry.registrations():
+        registrations = self.registry.registrations()
+        # Rotate the starting handler so one busy handler cannot take every free slot on each tick.
+        self._claim_offset = (self._claim_offset + 1) % len(registrations)
+        for registration in registrations[self._claim_offset :] + registrations[: self._claim_offset]:
             global_free = self.settings.WORKER_CONCURRENCY - len(self._inflight)
             if global_free <= 0:
                 break

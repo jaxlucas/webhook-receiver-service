@@ -151,3 +151,16 @@ async def test_queue_gauges_match_seeded_table(harness_factory: AppFactory) -> N
         health = (await h.client.get("/health")).json()
         assert health["queue"]["queued"] == 3 and health["queue"]["failed"] == 2
         assert metric_value(h.metrics, "webhook_worker_slots") == h.settings.WORKER_CONCURRENCY
+
+
+async def test_bounded_label_series_exist_at_zero(harness: Harness) -> None:
+    text = (await harness.client.get("/metrics")).text
+    for name, labels in (
+        ("webhook_leases_reaped_total", {"outcome": "requeued"}),
+        ("webhook_processing_total", {"handler": "stub", "outcome": "failed"}),
+        ("webhook_failed_total", {"reason": "timeout"}),
+        ("webhook_ingest_total", {"outcome": "reused_after_ttl"}),
+    ):
+        assert any(
+            n == name and all(lbl.get(k) == v for k, v in labels.items()) for n, lbl, _ in _samples(text)
+        ), name

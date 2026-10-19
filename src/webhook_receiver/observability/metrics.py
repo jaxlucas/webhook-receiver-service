@@ -86,6 +86,24 @@ class Metrics:
         self.build_info = Gauge(
             "webhook_build_info", "Build information", ["version", "schema_version"], registry=r
         )
+        # Pre-create every bounded label value at 0: Prometheus' increase()/rate() miss the first
+        # increment of a series that appears mid-run, which hid lease reaping in the kill load test.
+        for counter, values in (
+            (self.ingest, ("accepted", "duplicate", "conflict", "reused_after_ttl")),
+            (self.rejected, ("validation", "too_large", "unavailable")),
+            (self.failed, ("permanent_error", "retries_exhausted", "timeout", "lease_expiries_exhausted")),
+            (self.replays, ("accepted", "not_failed", "not_found")),
+            (self.lease_renewals, ("renewed", "lost", "error")),
+            (self.leases_reaped, ("requeued", "failed")),
+        ):
+            for value in values:
+                counter.labels(value)
+
+    def init_handler(self, name: str) -> None:
+        for outcome in ("completed", "retry", "failed", "lease_lost"):
+            self.processing.labels(name, outcome)
+        self.handler_timeouts.labels(name)
+        self.handler_inflight.labels(name).set(0)
 
 
 class QueueCollector(Collector):

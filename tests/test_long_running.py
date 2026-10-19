@@ -360,3 +360,42 @@ async def test_run_cpu_uses_a_process_pool(store: SqliteEventStore, tmp_path: Pa
 
 def test_idempotency_key_is_receipt_id() -> None:
     assert HandlerContext("abc", "t", 1, 0.0).idempotency_key == "abc"
+
+
+async def test_busy_default_handler_does_not_starve_named_handlers(
+    store: SqliteEventStore, tmp_path: Path
+) -> None:
+    gate = asyncio.Event()
+
+    async def blocked(event: Event, ctx: HandlerContext) -> Any:
+        await gate.wait()
+        return "ok"
+
+    registry = HandlerRegistry(blocked, HandlerSpec("default", 60, 4))
+    registry.register("named.job", blocked, HandlerSpec("named", 60, 4))
+    dispatcher = Dispatcher(
+        store, registry, _settings(tmp_path, WORKER_CONCURRENCY=4, CLAIM_BATCH=4), Metrics(), SystemClock()
+    )
+    for i in range(20):
+        await _add(store, f"d{i}", "default.job")
+    named = [await _add(store, f"n{i}", "named.job") for i in range(2)]
+    try:
+        # Free one slot at a time, as handlers finish: the named handler must get its turn.
+        claimed_named = 0
+        for _ in range(6):
+            await dispatcher.claim()
+            claimed_named = sum(1 for inf in dispatcher._inflight.values() if inf.claimed.id in named)
+            if claimed_named:
+                break
+            victim = next(iter(dispatcher._inflight.values()))
+            victim.task.cancel()
+            await asyncio.gather(victim.task, return_exceptions=True)
+        assert claimed_named >= 1
+    finally:
+        gate.set()
+        await drain_all(dispatcher)
+
+
+async def drain_all(dispatcher: Dispatcher) -> None:
+    tasks = [inf.task for inf in list(dispatcher._inflight.values()) if inf.task is not None]
+    await asyncio.gather(*tasks, return_exceptions=True)
